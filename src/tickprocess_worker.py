@@ -129,6 +129,28 @@ class TickProcessWorker:
 
         return symbols
 
+    def aggregate(self, panel, period=None):
+
+
+        resample_dict = {'open' : 'first', 'high': 'max',
+                'low' : 'min', 'close' : 'last',
+                'volume' : 'sum', 'delivery' : 'sum'}
+
+        agg_dict = {}
+
+        period = ''
+        if period in ('w', 'W', '1W', '1w'):
+            period = '1W'
+        elif period in ('m', 'M', '1M', '1m'):
+            period = '1M'
+
+        if period:
+            for item in panel:
+                agg_dict[item] = panel[item].resample(period,
+                                                    how=resample_dict)
+
+        return agg_dict
+
     def create_panels(self):
         """
         Create all panels.
@@ -141,7 +163,10 @@ class TickProcessWorker:
             #self.apply_bonus_split_changes()
 
             #self.panels['stocks_monthly'] = self.foo()
-            #self.panels['stocks_weekly'] = self.foo()
+            self.panels['stocks_weekly'] = pd.Panel(self.aggregate(
+                                            self.panels['stocks_daily'], '1W'))
+            self.panels['stocks_monthly'] = pd.Panel(self.aggregate(
+                                            self.panels['stocks_daily'], '1M'))
         except Exception as e:
             self.logger.error(e)
             pass
