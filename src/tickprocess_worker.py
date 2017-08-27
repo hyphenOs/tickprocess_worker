@@ -15,7 +15,6 @@ from tickerplot.sql.sqlalchemy_wrapper import execute_one
 
 from tickerplot.utils.logger import get_logger
 
-
 class TickProcessWorkerExceptionDBInit(Exception):
     pass
 
@@ -26,7 +25,7 @@ class TickProcessProfiler(object):
 
     def __init__(self, parent=None, enabled=False, contextstr=None):
         self.parent = parent
-        self.enabled = True
+        self.enabled = enabled
 
         self.stream = StringIO.StringIO()
         self.contextstr = contextstr or str(self.__class__)
@@ -36,11 +35,13 @@ class TickProcessProfiler(object):
     def __enter__(self, *args):
 
         if not self.enabled:
-            return
+            return None
 
         # Start profiling.
         self.stream.write("profile: {}: enter\n".format(self.contextstr))
         self.profiler.enable()
+
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
 
@@ -76,6 +77,11 @@ class TickProcessWorker:
             self.logger.error(e)
             self._db_meta = None
             raise TickProcessWorkerExceptionDBInit("Failed to Init DB")
+
+        self.enable_profiling = False
+
+    def set_profiling(self, enabled=False):
+        self.enable_profiling = enabled
 
     def _do_read_db(self):
         """
@@ -138,7 +144,7 @@ class TickProcessWorker:
 
         agg_dict = {}
 
-        period = ''
+        period = period or ''
         if period in ('w', 'W', '1W', '1w'):
             period = '1W'
         elif period in ('m', 'M', '1M', '1m'):
@@ -148,7 +154,6 @@ class TickProcessWorker:
             for item in panel:
                 agg_dict[item] = panel[item].resample(period,
                                                     how=resample_dict)
-
         return agg_dict
 
     def create_panels(self):
@@ -156,17 +161,21 @@ class TickProcessWorker:
         Create all panels.
         """
         try:
-            with TickProcessProfiler(parent=self) as p:
+            with TickProcessProfiler(parent=self, enabled=self.enable_profiling) as p:
                 scripdata_dict =self._do_read_db()
                 self.panels['stocks_daily'] = pd.Panel(scripdata_dict)
-            print (self.panels['stocks_daily'])
             #self.apply_bonus_split_changes()
 
             #self.panels['stocks_monthly'] = self.foo()
-            self.panels['stocks_weekly'] = pd.Panel(self.aggregate(
-                                            self.panels['stocks_daily'], '1W'))
-            self.panels['stocks_monthly'] = pd.Panel(self.aggregate(
-                                            self.panels['stocks_daily'], '1M'))
+            weekly_agg = self.aggregate(panel=self.panels['stocks_daily'],
+                                            period='1W')
+            self.panels['stocks_weekly'] = pd.Panel(weekly_agg)
+
+            monthly_agg = self.aggregate(self.panels['stocks_daily'], '1M')
+            self.panels['stocks_monthly'] = monthly_agg
+
+            del weekly_agg, monthly_agg
+
         except Exception as e:
             self.logger.error(e)
             pass
