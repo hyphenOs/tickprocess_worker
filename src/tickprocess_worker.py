@@ -6,6 +6,7 @@ from __future__ import print_function
 import pandas as pd
 import cProfile, pstats
 import StringIO
+import time
 
 from tickerplot.sql.sqlalchemy_wrapper import create_or_get_all_scrips_table
 from tickerplot.sql.sqlalchemy_wrapper import create_or_get_nse_equities_hist_data
@@ -135,7 +136,7 @@ class TickProcessWorker:
 
         return symbols
 
-    def aggregate(self, panel, period=None):
+    def aggregate(self, orig_dict, period=None):
 
 
         resample_dict = {'open' : 'first', 'high': 'max',
@@ -151,8 +152,8 @@ class TickProcessWorker:
             period = '1M'
 
         if period:
-            for item in panel:
-                agg_dict[item] = panel[item].resample(period,
+            for item in orig_dict:
+                agg_dict[item] = orig_dict[item].resample(period,
                                                     how=resample_dict)
         return agg_dict
 
@@ -162,26 +163,45 @@ class TickProcessWorker:
         """
         try:
             with TickProcessProfiler(parent=self, enabled=self.enable_profiling) as p:
-                scripdata_dict =self._do_read_db()
-                self.panels['stocks_daily'] = pd.Panel(scripdata_dict)
+                scripdata_dict = self._do_read_db()
+                self.panels['stocks_daily'] = scripdata_dict
             #self.apply_bonus_split_changes()
 
             #self.panels['stocks_monthly'] = self.foo()
-            weekly_agg = self.aggregate(panel=self.panels['stocks_daily'],
-                                            period='1W')
-            self.panels['stocks_weekly'] = pd.Panel(weekly_agg)
+            #weekly_agg = self.aggregate(orig_dict=scripdata_dict, period='1W')
+            #self.panels['stocks_weekly'] = pd.Panel(weekly_agg)
 
-            monthly_agg = self.aggregate(self.panels['stocks_daily'], '1M')
-            self.panels['stocks_monthly'] = monthly_agg
-
-            del weekly_agg, monthly_agg
+            #monthly_agg = self.aggregate(orig_dict=scripdata_dict, period='1M')
+            #self.panels['stocks_monthly'] = monthly_agg
 
         except Exception as e:
             self.logger.error(e)
             pass
+
+    def above_50_ema_daily(self):
+
+        daily_data = self.panels['stocks_daily']
+
+        then = time.time()
+        above_50 = []
+        below_50 = []
+        for symbol in daily_data:
+            df = daily_data[symbol]
+            if not df['close'].empty:
+                df['ema_close_50'] = pd.ewma(df['close'], 50)
+                if df['ema_close_50'][-1] <= df['close'][-1]:
+                    above_50.append(symbol)
+                else:
+                    below_50.append(symbol)
+            else:
+                pass #print (symbol)
+
+        now = time.time()
+        print (len(above_50), len(below_50), now - then)
 
 if __name__ == '__main__':
 
     t = TickProcessWorker(db_path=
             'sqlite:////home/gabhijit/backup/personal-code/equities-data-utils/nse_hist_data.sqlite3')
     t.create_panels()
+    t.above_50_ema_daily()
