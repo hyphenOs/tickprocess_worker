@@ -3,16 +3,16 @@ Implementation of Worker for tick-process application
 """
 from __future__ import print_function
 
-import pandas as pd
-import cProfile, pstats
-import StringIO
 import time
+
+import pandas as pd
 
 from tickerplot.sql.sqlalchemy_wrapper import create_or_get_all_scrips_table
 from tickerplot.sql.sqlalchemy_wrapper import create_or_get_nse_equities_hist_data
 from tickerplot.sql.sqlalchemy_wrapper import get_metadata
 from tickerplot.sql.sqlalchemy_wrapper import select_expr
 from tickerplot.sql.sqlalchemy_wrapper import execute_one
+from tickerplot.utils.profiler import TickerplotProfiler
 
 from tickerplot.utils.logger import get_logger
 
@@ -21,43 +21,6 @@ class TickProcessWorkerExceptionDBInit(Exception):
 
 class TickProcessWorkerExceptionInvalidDB(Exception):
     pass
-
-class TickProcessProfiler(object):
-
-    def __init__(self, parent=None, enabled=False, contextstr=None):
-        self.parent = parent
-        self.enabled = enabled
-
-        self.stream = StringIO.StringIO()
-        self.contextstr = contextstr or str(self.__class__)
-
-        self.profiler = cProfile.Profile()
-
-    def __enter__(self, *args):
-
-        if not self.enabled:
-            return None
-
-        # Start profiling.
-        self.stream.write("profile: {}: enter\n".format(self.contextstr))
-        self.profiler.enable()
-
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-
-        if not self.enabled:
-            return
-
-        self.profiler.disable()
-
-        sort_by = 'cumulative'
-        ps = pstats.Stats(self.profiler, stream=self.stream).sort_stats(sort_by)
-        ps.print_stats(0.1)
-
-        self.stream.write("profile: {}: exit\n".format(self.contextstr))
-        print (self.stream.getvalue())
-
 
 class TickProcessWorker:
 
@@ -162,7 +125,7 @@ class TickProcessWorker:
         Create all panels.
         """
         try:
-            with TickProcessProfiler(parent=self, enabled=self.enable_profiling) as p:
+            with TickerplotProfiler(parent=self, enabled=self.enable_profiling) as p:
                 scripdata_dict = self._do_read_db()
                 self.panels['stocks_daily'] = scripdata_dict
             #self.apply_bonus_split_changes()
@@ -178,6 +141,34 @@ class TickProcessWorker:
             self.logger.error(e)
             pass
 
+    def filter(self, **kw):
+        scales_dict = { 'daily': 'stocks_daily',
+                        'weekly' : 'stocks_weekly',
+                        'monthly' : 'stocks_monthly' }
+        functions = { 'ema' : pd.Series.ewm }
+        if 'symbols' in kw:
+            symlist = kw['symbols']
+
+        if 'timescale' in kw:
+            cur_dict = scales_dict[kw['timescale']]
+
+        # Function to be applied on each 'col' of the 'symbols'
+        # on the 'timescale'
+        if 'function' in kw:
+            function = functions[kw['function']]
+
+        if 'col' in kw:
+            col = kw['col']
+        else:
+            col = 'close'
+
+
+        filtered = []
+        not_filtered = []
+        for symbol in symlist:
+            res_series = function(cur_dict[symbol][col])
+
+
     def above_50_ema_daily(self):
 
         daily_data = self.panels['stocks_daily']
@@ -188,8 +179,9 @@ class TickProcessWorker:
         for symbol in daily_data:
             df = daily_data[symbol]
             if not df['close'].empty:
-                df['ema_close_50'] = pd.ewma(df['close'], 50)
-                if df['ema_close_50'][-1] <= df['close'][-1]:
+                df['ema_close_50'] = pd.ewma(df['close'], span=50)
+                #if df['ema_close_50'][-1] <= df['close'][-1]:
+                if df['ema_close_50'][-1].__le__(df['close'][-1]):
                     above_50.append(symbol)
                 else:
                     below_50.append(symbol)

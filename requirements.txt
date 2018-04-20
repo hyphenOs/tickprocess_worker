@@ -1,0 +1,5 @@
+numpy==1.13.1
+pandas==0.20.3
+
+# Use tickerplot package directly from github
+-e git+https://github.com/gabhijit/tickerplot.git@v0.0.2#egg=tickerplot
