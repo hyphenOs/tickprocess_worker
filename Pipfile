@@ -1,0 +1,14 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[dev-packages]
+pylint = "*"
+
+[packages]
+pandas = "==0.20.3"
+tickerplot = {ref = "v0.0.4", git = "https://github.com/gabhijit/tickerplot.git", editable = true}
+
+[requires]
+python_version = "2.7"

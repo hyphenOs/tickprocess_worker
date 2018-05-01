@@ -1,5 +1,15 @@
-numpy==1.13.1
+-i https://pypi.org/simple
+-e git+https://github.com/gabhijit/tickerplot.git@v0.0.4#egg=tickerplot
+beautifulsoup4==4.6.0
+bs4==0.0.1
+certifi==2018.4.16
+chardet==3.0.4
+idna==2.6
+numpy==1.14.3
 pandas==0.20.3
-
-# Use tickerplot package directly from github
--e git+https://github.com/gabhijit/tickerplot.git@v0.0.2#egg=tickerplot
+python-dateutil==2.7.2
+pytz==2018.4
+requests==2.18.4
+six==1.11.0
+sqlalchemy==1.1.13
+urllib3==1.22
