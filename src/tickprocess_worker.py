@@ -1,3 +1,8 @@
+#!venv/bin/python
+
+#pylint: disable-msg:broad-except
+#pylint: disable-msg=broad-except
+
 """
 Implementation of Worker for tick-process application
 """
@@ -125,7 +130,7 @@ class TickProcessWorker:
         Create all panels.
         """
         try:
-            with TickerplotProfiler(parent=self, enabled=self.enable_profiling) as p:
+            with TickerplotProfiler(parent=self, enabled=self.enable_profiling):
                 scripdata_dict = self._do_read_db()
                 self.panels['stocks_daily'] = scripdata_dict
             #self.apply_bonus_split_changes()
@@ -139,7 +144,6 @@ class TickProcessWorker:
 
         except Exception as e:
             self.logger.error(e)
-            pass
 
     def filter(self, **kw):
         scales_dict = { 'daily': 'stocks_daily',
@@ -163,10 +167,8 @@ class TickProcessWorker:
             col = 'close'
 
 
-        filtered = []
-        not_filtered = []
         for symbol in symlist:
-            res_series = function(cur_dict[symbol][col])
+            _ = function(cur_dict[symbol][col])
 
 
     def above_50_ema_daily(self):

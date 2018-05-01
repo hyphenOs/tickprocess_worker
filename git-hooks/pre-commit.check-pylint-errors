@@ -1,0 +1,24 @@
+#!/bin/bash
+
+PYLINT=venv/bin/pylint
+
+TOPLEVEL=`git rev-parse --show-toplevel`
+
+PYLINTRC=${TOPLEVEL}/.pylintrc
+
+PYLINT_OPTS="--rcfile=${PYLINTRC}"
+
+PYTHON_FILES=$(git diff --name-only --cached --diff-filter=ACM | grep '\.py$')
+echo "Running Pylint ...."
+echo "${PYLINT} ${PYLINT_OPTS} ${PYTHON_FILES}"
+${PYLINT} ${PYLINT_OPTS} ${PYTHON_FILES}
+RESULT=$?
+
+ALL_RESULT=$(( $((${RESULT}&4)) || $((${RESULT}&2)) || $((${RESULT}&1)) ))
+if [[ ${ALL_RESULT} -eq 0 ]]; then
+	echo "pylint: Looks Okay."
+	exit 0
+else
+	echo "pylint: Errors or Warning. Fix them first..."
+	exit -1
+fi
