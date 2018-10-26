@@ -9,6 +9,7 @@ Implementation of Worker for tick-process application
 from __future__ import print_function
 
 import time
+from collections import namedtuple
 
 import pandas as pd
 
@@ -21,6 +22,8 @@ from tickerplot.utils.profiler import TickerplotProfiler
 
 from tickerplot.utils.logger import get_logger
 
+function_signature = namedtuple('Signature', ['name', 'obj_attr', 'is_callable'])
+
 class TickProcessWorkerExceptionDBInit(Exception):
     pass
 
@@ -29,10 +32,13 @@ class TickProcessWorkerExceptionInvalidDB(Exception):
 
 class TickProcessWorker:
 
+    _supported_ops = { 'ema' : function_signature(*('ewm', 'mean', True)) }
+
     def __init__(self, db_path=None, log_file=None):
 
         self.panels = {}
         self.symbols = []
+        self._last_symbols = None
 
         # Setup a logger, we might need it immediately below
         log_file = log_file or 'tickprocess_worker.log'
@@ -47,10 +53,15 @@ class TickProcessWorker:
             self._db_meta = None
             raise TickProcessWorkerExceptionDBInit("Failed to Init DB")
 
-        self.enable_profiling = False
+        self._profiling = False
 
-    def set_profiling(self, enabled=False):
-        self.enable_profiling = enabled
+    @property
+    def profiling(self):
+        return self._profiling
+
+    @profiling.setter
+    def profiling(self, value):
+        self._profiling = value
 
     def _do_read_db(self):
         """
@@ -78,6 +89,9 @@ class TickProcessWorker:
                                             order_by(hist_data.c.date)
 
             scripdata = pd.io.sql.read_sql(sql_st, engine)
+
+            if scripdata.empty:
+                continue
 
             scripdata.columns = ['date', 'open', 'high', 'low', 'close', 'volume',
                                 'delivery']
@@ -125,51 +139,97 @@ class TickProcessWorker:
                                                     how=resample_dict)
         return agg_dict
 
+    def apply_bonus_split_changes(self):
+        pass
+
     def create_panels(self):
         """
         Create all panels.
         """
         try:
-            with TickerplotProfiler(parent=self, enabled=self.enable_profiling):
+            with TickerplotProfiler(parent=self, enabled=self._profiling) as profiler:
                 scripdata_dict = self._do_read_db()
                 self.panels['stocks_daily'] = scripdata_dict
-            #self.apply_bonus_split_changes()
+            self.apply_bonus_split_changes()
 
-            #self.panels['stocks_monthly'] = self.foo()
-            #weekly_agg = self.aggregate(orig_dict=scripdata_dict, period='1W')
-            #self.panels['stocks_weekly'] = pd.Panel(weekly_agg)
+            weekly_agg = self.aggregate(orig_dict=scripdata_dict, period='1W')
+            self.panels['stocks_weekly'] = pd.Panel(weekly_agg)
 
-            #monthly_agg = self.aggregate(orig_dict=scripdata_dict, period='1M')
-            #self.panels['stocks_monthly'] = monthly_agg
+            monthly_agg = self.aggregate(orig_dict=scripdata_dict, period='1M')
+            self.panels['stocks_monthly'] = monthly_agg
+
+            print(profiler.get_profile_data())
 
         except Exception as e:
             self.logger.error(e)
 
-    def filter(self, **kw):
+    def filter(self, compute_column, check_column='close', symbols=None, op=None,
+            op_params=None, op_criteria=None, lookback=None, threshold=None,
+            timescale='daily'):
+        """
+        Applies a filter function based on certain criteria specified as
+        arguments.
+
+        """
+
+        out_symbols = []
         scales_dict = { 'daily': 'stocks_daily',
                         'weekly' : 'stocks_weekly',
                         'monthly' : 'stocks_monthly' }
-        functions = { 'ema' : pd.Series.ewm }
-        if 'symbols' in kw:
-            symlist = kw['symbols']
 
-        if 'timescale' in kw:
-            cur_dict = scales_dict[kw['timescale']]
+        if op is None and lookback is None:
+            raise ValueError("One of the Op or Loopback must be specified.")
 
-        # Function to be applied on each 'col' of the 'symbols'
-        # on the 'timescale'
-        if 'function' in kw:
-            function = functions[kw['function']]
+        if op not in self._supported_ops:
+            raise ValueError("Op '{}' not in one of the supported Ops.".format(op))
 
-        if 'col' in kw:
-            col = kw['col']
-        else:
-            col = 'close'
+        panel = self.panels.get(scales_dict.get(timescale, None), None)
+        if not panel:
+            raise ValueError("Dataframe for timescale {} not loaded."\
+                    .format(timescale))
 
+        if symbols is None:
+            symbols = panel.keys()
 
-        for symbol in symlist:
-            _ = function(cur_dict[symbol][col])
+        if op:
+            function, attr, is_callable = self._supported_ops.get(op, None)
 
+            if op_params is None or op_criteria is None:
+                raise ValueError("Need to specify both 'op_params' and "
+                    "'op_criteria' when Op is specified.")
+
+            for symbol in symbols:
+                last_val = panel[symbol][check_column].iloc[-1]
+
+                series = panel[symbol][compute_column]
+                f = getattr(series, function)
+                result = f(**op_params)
+                a = getattr(result, attr)
+                if is_callable:
+                    final = a()
+                    last_computed = final.iloc[-1]
+                else:
+                    final = a
+                    last_computed = final[-1]
+
+                if op_criteria == 'above':
+                    multiplier = 1 + threshold
+                    if last_val >= (last_computed * multiplier):
+                        out_symbols.append(symbol)
+                elif op_criteria == 'below':
+                    multiplier = 1 - threshold
+                    if last_val <= (last_computed * multiplier):
+                        out_symbols.append(symbol)
+                elif op_criteria == 'times':
+                    multiplier = threshold
+                    if threshold < 1.0:
+                        if last_val <= (last_computed * multiplier):
+                            out_symbols.append(symbol)
+                    if threshold > 1.0:
+                        if last_val >= (last_computed * multiplier):
+                            out_symbols.append(symbol)
+
+        print(out_symbols)
 
     def above_50_ema_daily(self):
 
@@ -195,7 +255,17 @@ class TickProcessWorker:
 
 if __name__ == '__main__':
 
+    print(time.time())
     t = TickProcessWorker(db_path=
             'sqlite:////home/gabhijit/backup/personal-code/equities-data-utils/nse_hist_data.sqlite3')
+    print(time.time())
     t.create_panels()
+    t.profiling = True
     t.above_50_ema_daily()
+    print(time.time())
+    with TickerplotProfiler(parent=t, enabled=t.profiling) as p:
+        syms = t.filter(check_column='close', compute_column='close', op='ema', op_params={'span':50}, op_criteria='above', threshold=0.05)
+        syms = t.filter(symbols=syms, check_column='close', compute_column='close', op='ema', op_params={'span':20}, op_criteria='above', threshold=0.05)
+        syms = t.filter(check_column='volume', compute_column='volume', op='ema', op_params={'span':50}, op_criteria='times', threshold=2.00)
+    print(p.get_profile_data())
+    print(time.time())
