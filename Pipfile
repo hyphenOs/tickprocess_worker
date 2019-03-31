@@ -7,8 +7,9 @@ name = "pypi"
 pylint = "*"
 
 [packages]
-pandas = "==0.20.3"
-tickerplot = {ref = "v0.0.4", git = "https://github.com/gabhijit/tickerplot.git", editable = true}
+pandas = "*"
+tickerplot = {ref = "v0.0.6", git = "https://github.com/gabhijit/tickerplot.git", editable = true}
+requests = "*"
 
 [requires]
 python_version = "2.7"
